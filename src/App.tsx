@@ -1,4 +1,5 @@
 import { FormEvent, PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
+import { isSupabaseEnabled, supabase } from "./supabase";
 
 type NoteColor = "red" | "yellow" | "blue";
 
@@ -162,6 +163,28 @@ function formatDate(iso: string) {
   }).format(new Date(iso));
 }
 
+function fromDatabase(row: Record<string, unknown>): StickyNote {
+  return {
+    id: row.id as string,
+    ownerId: row.user_id as string,
+    author: (row.author as string | null) ?? undefined,
+    text: row.text as string,
+    color: row.color as NoteColor,
+    x: row.x as number,
+    y: row.y as number,
+    emoji: (row.emoji as string | null) ?? undefined,
+    drawing: (row.drawing_url as string | null) ?? undefined,
+    likes: row.likes as number,
+    rotation: row.rotation as number,
+    createdAt: row.created_at as string,
+    updatedAt: row.updated_at as string,
+  };
+}
+
+async function drawingToBlob(dataUrl: string) {
+  return await (await fetch(dataUrl)).blob();
+}
+
 function Icon({ name }: { name: "pen" | "heart" | "lock" | "close" | "trash" | "sparkle" }) {
   const paths = {
     pen: <><path d="m14.7 6.3 3 3"/><path d="M4 20l4.2-1 10.4-10.4a2.1 2.1 0 0 0-3-3L5.2 16 4 20Z"/></>,
@@ -177,6 +200,8 @@ function Icon({ name }: { name: "pen" | "heart" | "lock" | "close" | "trash" | "
 function DrawingCanvas({ onChange }: { onChange: (data?: string) => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
+  const [tool, setTool] = useState<"pen" | "eraser">("pen");
+  const [lineWidth, setLineWidth] = useState(7);
 
   const point = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current!;
@@ -196,8 +221,9 @@ function DrawingCanvas({ onChange }: { onChange: (data?: string) => void }) {
     const ctx = event.currentTarget.getContext("2d")!;
     const p = point(event);
     ctx.lineTo(p.x, p.y);
+    ctx.globalCompositeOperation = tool === "eraser" ? "destination-out" : "source-over";
     ctx.strokeStyle = "#423d38";
-    ctx.lineWidth = 4;
+    ctx.lineWidth = tool === "eraser" ? lineWidth * 2.2 : lineWidth;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.stroke();
@@ -205,7 +231,11 @@ function DrawingCanvas({ onChange }: { onChange: (data?: string) => void }) {
   const end = () => {
     if (!drawing.current) return;
     drawing.current = false;
-    onChange(canvasRef.current?.toDataURL("image/png"));
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const pixels = canvas.getContext("2d")?.getImageData(0, 0, canvas.width, canvas.height).data;
+    const hasInk = pixels ? pixels.some((value, index) => index % 4 === 3 && value > 0) : false;
+    onChange(hasInk ? canvas.toDataURL("image/png") : undefined);
   };
   const clear = () => {
     const canvas = canvasRef.current!;
@@ -214,6 +244,11 @@ function DrawingCanvas({ onChange }: { onChange: (data?: string) => void }) {
   };
 
   return <div className="drawing-wrap">
+    <div className="drawing-tools">
+      <button type="button" className={tool === "pen" ? "active" : ""} onClick={() => setTool("pen")}>✎ ペン</button>
+      <button type="button" className={tool === "eraser" ? "active" : ""} onClick={() => setTool("eraser")}>▱ 消しゴム</button>
+      <label>太さ <input type="range" min="3" max="24" value={lineWidth} onChange={event => setLineWidth(Number(event.target.value))}/></label>
+    </div>
     <canvas ref={canvasRef} width="760" height="380" onPointerDown={start} onPointerMove={move} onPointerUp={end} onPointerCancel={end} />
     <div className="drawing-hint"><span>ここに指やマウスで落書きできます</span><button type="button" onClick={clear}>描き直す</button></div>
   </div>;
@@ -260,26 +295,86 @@ function CloseButton({ onClick }: { onClick: () => void }) {
 }
 
 export default function App() {
-  const [notes, setNotes] = useState<StickyNote[]>(loadNotes);
+  const [notes, setNotes] = useState<StickyNote[]>(() => isSupabaseEnabled ? [] : loadNotes());
   const [ownerId] = useState(getOwnerId);
+  const [remoteOwnerId, setRemoteOwnerId] = useState<string>();
   const [page, setPage] = useState(0);
-  const [liked, setLiked] = useState<Set<string>>(loadLiked);
+  const [liked, setLiked] = useState<Set<string>>(() => isSupabaseEnabled ? new Set() : loadLiked());
   const [selectedId, setSelectedId] = useState<string>();
   const [creating, setCreating] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const [admin, setAdmin] = useState(false);
+  const [adminSecret, setAdminSecret] = useState("");
   const [adminPassword, setAdminPassword] = useState("");
   const [adminError, setAdminError] = useState(false);
   const [toast, setToast] = useState("");
+  const [loading, setLoading] = useState(isSupabaseEnabled);
+  const [connectionError, setConnectionError] = useState("");
   const [isMobile, setIsMobile] = useState(() => window.matchMedia("(max-width: 700px)").matches);
   const boardRef = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ id: string; dx: number; dy: number; moved: boolean } | undefined>(undefined);
+  const drag = useRef<{ id: string; dx: number; dy: number; x: number; y: number; moved: boolean } | undefined>(undefined);
   const readOnly = String(import.meta.env.VITE_READ_ONLY).toLowerCase() === "true";
+  const effectiveOwnerId = remoteOwnerId ?? ownerId;
   const pageCount = Math.max(1, Math.ceil(notes.length / NOTES_PER_PAGE));
   const visibleNotes = notes.slice(page * NOTES_PER_PAGE, (page + 1) * NOTES_PER_PAGE);
 
-  useEffect(() => localStorage.setItem(STORAGE_KEY, JSON.stringify(notes)), [notes]);
-  useEffect(() => localStorage.setItem(LIKED_KEY, JSON.stringify([...liked])), [liked]);
+  useEffect(() => {
+    if (!isSupabaseEnabled) localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
+  }, [notes]);
+  useEffect(() => {
+    if (!isSupabaseEnabled) localStorage.setItem(LIKED_KEY, JSON.stringify([...liked]));
+  }, [liked]);
+  useEffect(() => {
+    const client = supabase;
+    if (!client) return;
+    let active = true;
+
+    const fetchRemoteNotes = async () => {
+      const { data, error } = await client.from("sticky_notes").select("*").order("created_at", { ascending: true });
+      if (!active) return;
+      if (error) throw error;
+      setNotes((data ?? []).map(row => fromDatabase(row)));
+    };
+
+    const initialize = async () => {
+      try {
+        const { data: sessionData } = await client.auth.getSession();
+        let user = sessionData.session?.user;
+        if (!user) {
+          const { data, error } = await client.auth.signInAnonymously();
+          if (error) throw error;
+          user = data.user ?? undefined;
+        }
+        if (!user) throw new Error("匿名ユーザーを作成できませんでした");
+        if (!active) return;
+        setRemoteOwnerId(user.id);
+        await fetchRemoteNotes();
+        const { data: likeRows, error: likeError } = await client
+          .from("sticky_note_likes")
+          .select("note_id")
+          .eq("user_id", user.id);
+        if (likeError) throw likeError;
+        if (active) setLiked(new Set((likeRows ?? []).map(row => row.note_id as string)));
+      } catch (error) {
+        if (active) setConnectionError(error instanceof Error ? error.message : "Supabaseへ接続できませんでした");
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+
+    void initialize();
+    const channel = client
+      .channel("sticky-notes-board")
+      .on("postgres_changes", { event: "*", schema: "public", table: "sticky_notes" }, () => {
+        void fetchRemoteNotes().catch(() => undefined);
+      })
+      .subscribe();
+
+    return () => {
+      active = false;
+      void client.removeChannel(channel);
+    };
+  }, []);
   useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(""), 2500);
@@ -296,7 +391,7 @@ export default function App() {
   }, [page, pageCount]);
 
   const selected = notes.find(note => note.id === selectedId);
-  const createNote = (input: Pick<StickyNote, "author" | "text" | "color" | "emoji" | "drawing">) => {
+  const createNote = async (input: Pick<StickyNote, "author" | "text" | "color" | "emoji" | "drawing">) => {
     const now = new Date().toISOString();
     const slot = notes.length % NOTES_PER_PAGE;
     const destinationPage = Math.floor(notes.length / NOTES_PER_PAGE);
@@ -305,7 +400,7 @@ export default function App() {
     const note: StickyNote = {
       ...input,
       id: crypto.randomUUID(),
-      ownerId,
+      ownerId: effectiveOwnerId,
       x: openSpot.x + Math.random(),
       y: openSpot.y + Math.random(),
       likes: 0,
@@ -313,54 +408,164 @@ export default function App() {
       createdAt: now,
       updatedAt: now,
     };
-    setNotes(current => [...current, note]);
+    if (supabase) {
+      if (!remoteOwnerId) {
+        setToast("接続準備中です。少し待ってから試してください");
+        return;
+      }
+      try {
+        let drawingUrl: string | undefined;
+        if (input.drawing) {
+          const path = `${remoteOwnerId}/${note.id}.png`;
+          const { error: uploadError } = await supabase.storage.from("drawings").upload(path, await drawingToBlob(input.drawing), {
+            contentType: "image/png",
+            upsert: false,
+          });
+          if (uploadError) throw uploadError;
+          drawingUrl = supabase.storage.from("drawings").getPublicUrl(path).data.publicUrl;
+        }
+        const { data, error } = await supabase.from("sticky_notes").insert({
+          id: note.id,
+          user_id: remoteOwnerId,
+          author: note.author ?? null,
+          text: note.text,
+          color: note.color,
+          x: note.x,
+          y: note.y,
+          emoji: note.emoji ?? null,
+          drawing_url: drawingUrl ?? null,
+          rotation: note.rotation,
+        }).select().single();
+        if (error) throw error;
+        setNotes(current => [...current.filter(item => item.id !== note.id), fromDatabase(data)]);
+      } catch (error) {
+        setToast(error instanceof Error ? `投稿できませんでした：${error.message}` : "投稿できませんでした");
+        return;
+      }
+    } else {
+      setNotes(current => [...current, note]);
+    }
     setPage(destinationPage);
     setCreating(false);
     setToast("付箋をボードに貼りました！");
   };
-  const like = (id: string) => {
+  const like = async (id: string) => {
     if (readOnly || liked.has(id)) return;
+    if (supabase) {
+      if (!remoteOwnerId) return;
+      const { error } = await supabase.from("sticky_note_likes").insert({ note_id: id, user_id: remoteOwnerId });
+      if (error && error.code !== "23505") {
+        setToast("ハートを送れませんでした");
+        return;
+      }
+      setLiked(current => new Set(current).add(id));
+      const { data } = await supabase.from("sticky_notes").select("likes, updated_at").eq("id", id).single();
+      if (data) setNotes(current => current.map(note => note.id === id ? { ...note, likes: data.likes, updatedAt: data.updated_at } : note));
+      return;
+    }
     setNotes(current => current.map(note => note.id === id ? { ...note, likes: note.likes + 1, updatedAt: new Date().toISOString() } : note));
     setLiked(current => new Set(current).add(id));
   };
-  const remove = (id: string) => {
+  const remove = async (id: string) => {
     if (!confirm("この付箋を削除しますか？")) return;
+    if (supabase) {
+      const { data, error } = await supabase.rpc("admin_delete_sticky_note", { note_id: id, provided_password: adminSecret });
+      if (error || !data) {
+        setToast("削除できませんでした");
+        return;
+      }
+    }
     setNotes(current => current.filter(note => note.id !== id));
     setSelectedId(undefined);
     setToast("付箋を削除しました");
   };
   const dragStart = (event: ReactPointerEvent<HTMLButtonElement>, note: StickyNote) => {
     if (isMobile) return;
-    if (!admin && (readOnly || note.ownerId !== ownerId)) return;
+    if (!admin && (readOnly || note.ownerId !== effectiveOwnerId)) return;
     const board = boardRef.current!;
     const rect = board.getBoundingClientRect();
     const noteRect = event.currentTarget.getBoundingClientRect();
-    drag.current = { id: note.id, dx: event.clientX - noteRect.left, dy: event.clientY - noteRect.top, moved: false };
+    drag.current = { id: note.id, dx: event.clientX - noteRect.left, dy: event.clientY - noteRect.top, x: note.x, y: note.y, moved: false };
     event.currentTarget.setPointerCapture(event.pointerId);
     const move = (nativeEvent: PointerEvent) => {
       if (!drag.current) return;
       const x = Math.max(0, Math.min(82, ((nativeEvent.clientX - rect.left - drag.current.dx) / rect.width) * 100));
       const y = Math.max(0, Math.min(76, ((nativeEvent.clientY - rect.top - drag.current.dy) / rect.height) * 100));
+      drag.current.x = x;
+      drag.current.y = y;
       if (Math.abs(nativeEvent.movementX) + Math.abs(nativeEvent.movementY) > 1) drag.current.moved = true;
       setNotes(current => current.map(item => item.id === note.id ? { ...item, x, y } : item));
     };
-    const end = () => {
+    const end = async () => {
       const didMove = drag.current?.moved;
+      const finalX = drag.current?.x ?? note.x;
+      const finalY = drag.current?.y ?? note.y;
       setNotes(current => current.map(item => item.id === note.id ? { ...item, updatedAt: new Date().toISOString() } : item));
       drag.current = undefined;
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", end);
-      if (!didMove) setSelectedId(note.id);
+      if (!didMove) {
+        setSelectedId(note.id);
+      } else if (supabase) {
+        if (admin && note.ownerId !== effectiveOwnerId) {
+          const { data, error } = await supabase.rpc("admin_move_sticky_note", {
+            note_id: note.id,
+            new_x: finalX,
+            new_y: finalY,
+            provided_password: adminSecret,
+          });
+          if (error || !data) setToast("位置を保存できませんでした");
+        } else {
+          const { error } = await supabase.from("sticky_notes").update({ x: finalX, y: finalY, updated_at: new Date().toISOString() }).eq("id", note.id);
+          if (error) setToast("位置を保存できませんでした");
+        }
+      }
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", end, { once: true });
   };
-  const loginAdmin = (event: FormEvent) => {
+  const loginAdmin = async (event: FormEvent) => {
     event.preventDefault();
-    const expected = import.meta.env.VITE_ADMIN_PASSWORD || "admin";
-    if (adminPassword === expected) {
+    let valid = false;
+    if (supabase) {
+      const { data, error } = await supabase.rpc("verify_board_admin", { provided_password: adminPassword });
+      valid = !error && data === true;
+    } else {
+      valid = adminPassword === (import.meta.env.VITE_ADMIN_PASSWORD || "admin");
+    }
+    if (valid) {
+      setAdminSecret(adminPassword);
       setAdmin(true); setAdminOpen(false); setAdminPassword(""); setAdminError(false); setToast("管理者モードを有効にしました");
     } else setAdminError(true);
+  };
+
+  const exportNotes = (format: "json" | "csv") => {
+    const stamp = new Date().toISOString().slice(0, 10);
+    let content: string;
+    let mime: string;
+    if (format === "json") {
+      content = JSON.stringify({ exportedAt: new Date().toISOString(), notes }, null, 2);
+      mime = "application/json;charset=utf-8";
+    } else {
+      const safeCell = (value: unknown) => {
+        let text = String(value ?? "");
+        if (/^[=+\-@]/.test(text)) text = `'${text}`;
+        return `"${text.replaceAll('"', '""')}"`;
+      };
+      const rows = [
+        ["id", "name", "comment", "color", "emoji", "likes", "drawing_url", "x", "y", "created_at"],
+        ...notes.map(note => [note.id, note.author ?? "", note.text, note.color, note.emoji ?? "", note.likes, note.drawing ?? "", note.x, note.y, note.createdAt]),
+      ];
+      content = `\uFEFF${rows.map(row => row.map(safeCell).join(",")).join("\r\n")}`;
+      mime = "text/csv;charset=utf-8";
+    }
+    const url = URL.createObjectURL(new Blob([content], { type: mime }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `p-gather-sticky-notes-${stamp}.${format}`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setToast(`${format.toUpperCase()}を書き出しました`);
   };
 
   return <div className="app-shell handmade-shell">
@@ -368,11 +573,12 @@ export default function App() {
       <a className="tiny-home" href="#top">ぺたぺた 感想ボード</a>
       <div className="header-actions">
         {readOnly && <span className="readonly-badge"><span/> 閲覧専用</span>}
-        {admin ? <button className="text-button active" onClick={() => setAdmin(false)}><Icon name="lock"/>管理者モード中</button> : <button className="text-button" onClick={() => setAdminOpen(true)}><Icon name="lock"/>管理者</button>}
+        {admin ? <button className="text-button active" onClick={() => { setAdmin(false); setAdminSecret(""); }}><Icon name="lock"/>管理者モード中</button> : <button className="text-button" onClick={() => setAdminOpen(true)}><Icon name="lock"/>管理者</button>}
       </div>
     </header>
 
     <main id="top">
+      {admin && <div className="admin-tools"><b>管理者メニュー</b><button onClick={() => exportNotes("json")}>JSON保存</button><button onClick={() => exportNotes("csv")}>CSV保存</button></div>}
       <section className="welcome-paper">
         <span className="welcome-tape" aria-hidden="true"/>
         <span className="scribble star-one" aria-hidden="true">☆</span>
@@ -390,7 +596,8 @@ export default function App() {
       </section>
 
       <section className="board-section">
-        <div className="board-label"><span className="pin"/><span>{notes.length}枚の付箋</span><small>{readOnly ? "クリックすると読めます" : "自分で書いた付箋だけ動かせます"}</small></div>
+        <div className="board-label"><span className="pin"/><span>{loading ? "付箋を読み込み中…" : `${notes.length}枚の付箋`}</span><small>{readOnly ? "クリックすると読めます" : "自分で書いた付箋だけ動かせます"}</small></div>
+        {connectionError && <div className="connection-error"><b>Supabaseの準備がまだ必要です</b><span>{connectionError}</span></div>}
         <div className="board-frame">
           <div className="frame-screw s1"/><div className="frame-screw s2"/><div className="frame-screw s3"/><div className="frame-screw s4"/>
           <div
@@ -400,7 +607,7 @@ export default function App() {
           >
             <div className="board-grain"/>
             {visibleNotes.map((note, index) => {
-              const mine = note.ownerId === ownerId;
+              const mine = note.ownerId === effectiveOwnerId;
               const canMove = !isMobile && (admin || (!readOnly && mine));
               return <button
               type="button"

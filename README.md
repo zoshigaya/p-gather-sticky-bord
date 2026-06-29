@@ -12,9 +12,16 @@ Webイベント向けの、手作り付箋風メッセージボードです。
 - 12枚ごとのページ送り
 - スマートフォン向け2列表示
 - 閲覧専用モード
-- localStorageへの保存
+- Supabaseへの共有保存（未設定時はlocalStorage）
+- 管理者向けJSON／CSVエクスポート
+- お絵描きのペン・消しゴム・太さ調整
 
-現在はUI確認用のローカル版です。本番公開時はSupabaseなどへの接続が必要です。
+## Supabaseの準備
+
+1. Supabase Dashboardの `Authentication > Providers > Anonymous` で匿名ログインを有効化します。
+2. `supabase/migrations/20260629150000_initial_board.sql` の `CHANGE_THIS_PASSWORD` を管理者パスワードへ置換します。
+3. 置換したSQL全体をSupabase DashboardのSQL Editorで実行します。
+4. `.env.local` にProject URLとPublishable keyを設定します。
 
 ## 起動
 
@@ -35,7 +42,8 @@ npm run build
 
 ```env
 VITE_READ_ONLY=false
-VITE_ADMIN_PASSWORD=admin
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_xxx
 ```
 
-`VITE_ADMIN_PASSWORD` はローカル試作用です。公開環境ではフロントエンドに管理者パスワードを置かず、サーバー側で認証してください。
+Supabase未接続時だけ、ローカル試作用の `VITE_ADMIN_PASSWORD` が使われます。公開環境の管理者パスワードはDB側で照合され、フロントエンドには保存されません。
