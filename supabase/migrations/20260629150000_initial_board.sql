@@ -98,14 +98,14 @@ create table if not exists private.app_settings (
 );
 
 insert into private.app_settings(key, value)
-values ('admin_password_hash', crypt('CHANGE_THIS_PASSWORD', gen_salt('bf')))
+values ('admin_password_hash', crypt('admin', gen_salt('bf')))
 on conflict (key) do update set value = excluded.value;
 
 create or replace function public.verify_board_admin(provided_password text)
 returns boolean
 language sql
 security definer
-set search_path = ''
+set search_path = 'extensions'
 as $$
   select provided_password <> 'CHANGE_THIS_PASSWORD'
     and exists (
