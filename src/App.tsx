@@ -858,7 +858,7 @@ export default function App() {
     <div className="app-shell handmade-shell">
       <header className="handmade-header">
         <a className="tiny-home" href="#top">
-          ぺたぺた 感想ボード
+          Pギャザ 感想ボード
         </a>
         {readOnly && (
           <span className="readonly-badge">
