@@ -273,9 +273,9 @@ function NoteForm({ onClose, onCreate }: NoteFormProps) {
     <form onSubmit={submit}>
       <label className="field"><span>お名前 <small>任意</small></span><input value={author} maxLength={30} onChange={e => setAuthor(e.target.value)} placeholder="匿名でも大丈夫です" /></label>
       <label className="field"><span>感想 <small>絵だけでもOK</small></span><textarea autoFocus value={text} maxLength={500} onChange={e => setText(e.target.value)} placeholder="好きだったところ、ひとこと感想など…（空欄でもOK）"/><small className="counter">{text.length} / 500</small></label>
+      <fieldset><legend>らくがき <small>感想なしでも投稿できます</small></legend><DrawingCanvas onChange={setDrawing}/></fieldset>
       <fieldset><legend>付箋の色</legend><div className="color-options">{colors.map(item => <label key={item.id} title={item.label}><input type="radio" name="color" checked={color === item.id} onChange={() => setColor(item.id)}/><span className={`swatch ${item.id}`}/><span>{item.label}</span></label>)}</div></fieldset>
       <fieldset><legend>リアクション <small>任意</small></legend><div className="emoji-options">{emojis.map((item, index) => <button type="button" key={index} className={emoji === item ? "selected" : ""} onClick={() => setEmoji(item)}>{item || "なし"}</button>)}</div></fieldset>
-      <fieldset><legend>らくがき <small>感想なしでも投稿できます</small></legend><DrawingCanvas onChange={setDrawing}/></fieldset>
       <div className="form-actions"><button type="button" className="button ghost" onClick={onClose}>キャンセル</button><button type="submit" className="button primary" disabled={!text.trim() && !drawing}><Icon name="pen"/>この付箋を貼る</button></div>
     </form>
   </Modal>;
@@ -295,7 +295,7 @@ function CloseButton({ onClick }: { onClick: () => void }) {
 }
 
 export default function App() {
-  const [notes, setNotes] = useState<StickyNote[]>(() => isSupabaseEnabled ? [] : loadNotes());
+  const [notes, setNotes] = useState<StickyNote[]>(() => isSupabaseEnabled ? [] : loadNotes().sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
   const [ownerId] = useState(getOwnerId);
   const [remoteOwnerId, setRemoteOwnerId] = useState<string>();
   const [page, setPage] = useState(0);
@@ -310,9 +310,6 @@ export default function App() {
   const [toast, setToast] = useState("");
   const [loading, setLoading] = useState(isSupabaseEnabled);
   const [connectionError, setConnectionError] = useState("");
-  const [isMobile, setIsMobile] = useState(() => window.matchMedia("(max-width: 700px)").matches);
-  const boardRef = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ id: string; dx: number; dy: number; x: number; y: number; moved: boolean } | undefined>(undefined);
   const readOnly = String(import.meta.env.VITE_READ_ONLY).toLowerCase() === "true";
   const effectiveOwnerId = remoteOwnerId ?? ownerId;
   const pageCount = Math.max(1, Math.ceil(notes.length / NOTES_PER_PAGE));
@@ -330,7 +327,7 @@ export default function App() {
     let active = true;
 
     const fetchRemoteNotes = async () => {
-      const { data, error } = await client.from("sticky_notes").select("*").order("created_at", { ascending: true });
+      const { data, error } = await client.from("sticky_notes").select("*").order("created_at", { ascending: false });
       if (!active) return;
       if (error) throw error;
       setNotes((data ?? []).map(row => fromDatabase(row)));
@@ -381,28 +378,21 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [toast]);
   useEffect(() => {
-    const media = window.matchMedia("(max-width: 700px)");
-    const update = () => setIsMobile(media.matches);
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, []);
-  useEffect(() => {
     if (page >= pageCount) setPage(pageCount - 1);
   }, [page, pageCount]);
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("admin") === "1") setAdminOpen(true);
+  }, []);
 
   const selected = notes.find(note => note.id === selectedId);
   const createNote = async (input: Pick<StickyNote, "author" | "text" | "color" | "emoji" | "drawing">) => {
     const now = new Date().toISOString();
-    const slot = notes.length % NOTES_PER_PAGE;
-    const destinationPage = Math.floor(notes.length / NOTES_PER_PAGE);
-    const notesOnDestinationPage = notes.slice(destinationPage * NOTES_PER_PAGE);
-    const openSpot = findOpenSpot(notesOnDestinationPage, slot);
     const note: StickyNote = {
       ...input,
       id: crypto.randomUUID(),
       ownerId: effectiveOwnerId,
-      x: openSpot.x + Math.random(),
-      y: openSpot.y + Math.random(),
+      x: 0,
+      y: 0,
       likes: 0,
       rotation: -2.5 + Math.random() * 5,
       createdAt: now,
@@ -437,15 +427,15 @@ export default function App() {
           rotation: note.rotation,
         }).select().single();
         if (error) throw error;
-        setNotes(current => [...current.filter(item => item.id !== note.id), fromDatabase(data)]);
+        setNotes(current => [fromDatabase(data), ...current.filter(item => item.id !== note.id)]);
       } catch (error) {
         setToast(error instanceof Error ? `投稿できませんでした：${error.message}` : "投稿できませんでした");
         return;
       }
     } else {
-      setNotes(current => [...current, note]);
+      setNotes(current => [note, ...current]);
     }
-    setPage(destinationPage);
+    setPage(0);
     setCreating(false);
     setToast("付箋をボードに貼りました！");
   };
@@ -478,51 +468,6 @@ export default function App() {
     setNotes(current => current.filter(note => note.id !== id));
     setSelectedId(undefined);
     setToast("付箋を削除しました");
-  };
-  const dragStart = (event: ReactPointerEvent<HTMLButtonElement>, note: StickyNote) => {
-    if (isMobile) return;
-    if (!admin && (readOnly || note.ownerId !== effectiveOwnerId)) return;
-    const board = boardRef.current!;
-    const rect = board.getBoundingClientRect();
-    const noteRect = event.currentTarget.getBoundingClientRect();
-    drag.current = { id: note.id, dx: event.clientX - noteRect.left, dy: event.clientY - noteRect.top, x: note.x, y: note.y, moved: false };
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const move = (nativeEvent: PointerEvent) => {
-      if (!drag.current) return;
-      const x = Math.max(0, Math.min(82, ((nativeEvent.clientX - rect.left - drag.current.dx) / rect.width) * 100));
-      const y = Math.max(0, Math.min(76, ((nativeEvent.clientY - rect.top - drag.current.dy) / rect.height) * 100));
-      drag.current.x = x;
-      drag.current.y = y;
-      if (Math.abs(nativeEvent.movementX) + Math.abs(nativeEvent.movementY) > 1) drag.current.moved = true;
-      setNotes(current => current.map(item => item.id === note.id ? { ...item, x, y } : item));
-    };
-    const end = async () => {
-      const didMove = drag.current?.moved;
-      const finalX = drag.current?.x ?? note.x;
-      const finalY = drag.current?.y ?? note.y;
-      setNotes(current => current.map(item => item.id === note.id ? { ...item, updatedAt: new Date().toISOString() } : item));
-      drag.current = undefined;
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", end);
-      if (!didMove) {
-        setSelectedId(note.id);
-      } else if (supabase) {
-        if (admin && note.ownerId !== effectiveOwnerId) {
-          const { data, error } = await supabase.rpc("admin_move_sticky_note", {
-            note_id: note.id,
-            new_x: finalX,
-            new_y: finalY,
-            provided_password: adminSecret,
-          });
-          if (error || !data) setToast("位置を保存できませんでした");
-        } else {
-          const { error } = await supabase.from("sticky_notes").update({ x: finalX, y: finalY, updated_at: new Date().toISOString() }).eq("id", note.id);
-          if (error) setToast("位置を保存できませんでした");
-        }
-      }
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", end, { once: true });
   };
   const loginAdmin = async (event: FormEvent) => {
     event.preventDefault();
@@ -571,14 +516,11 @@ export default function App() {
   return <div className="app-shell handmade-shell">
     <header className="handmade-header">
       <a className="tiny-home" href="#top">ぺたぺた 感想ボード</a>
-      <div className="header-actions">
-        {readOnly && <span className="readonly-badge"><span/> 閲覧専用</span>}
-        {admin ? <button className="text-button active" onClick={() => { setAdmin(false); setAdminSecret(""); }}><Icon name="lock"/>管理者モード中</button> : <button className="text-button" onClick={() => setAdminOpen(true)}><Icon name="lock"/>管理者</button>}
-      </div>
+      {readOnly && <span className="readonly-badge"><span/> 閲覧専用</span>}
     </header>
 
     <main id="top">
-      {admin && <div className="admin-tools"><b>管理者メニュー</b><button onClick={() => exportNotes("json")}>JSON保存</button><button onClick={() => exportNotes("csv")}>CSV保存</button></div>}
+      {admin && <div className="admin-tools"><b>管理者メニュー</b><button onClick={() => exportNotes("json")}>JSON保存</button><button onClick={() => exportNotes("csv")}>CSV保存</button><button onClick={() => { setAdmin(false); setAdminSecret(""); }}>終了</button></div>}
       <section className="welcome-paper">
         <span className="welcome-tape" aria-hidden="true"/>
         <span className="scribble star-one" aria-hidden="true">☆</span>
@@ -596,36 +538,27 @@ export default function App() {
       </section>
 
       <section className="board-section">
-        <div className="board-label"><span className="pin"/><span>{loading ? "付箋を読み込み中…" : `${notes.length}枚の付箋`}</span><small>{readOnly ? "クリックすると読めます" : "自分で書いた付箋だけ動かせます"}</small></div>
+        <div className="board-label"><span className="pin"/><span>{loading ? "付箋を読み込み中…" : `${notes.length}枚の付箋`}</span><small>新しい付箋から順番に並んでいます</small></div>
         {connectionError && <div className="connection-error"><b>Supabaseの準備がまだ必要です</b><span>{connectionError}</span></div>}
         <div className="board-frame">
           <div className="frame-screw s1"/><div className="frame-screw s2"/><div className="frame-screw s3"/><div className="frame-screw s4"/>
-          <div
-            className="board"
-            ref={boardRef}
-            style={{ "--mobile-board-height": `${Math.max(2, Math.ceil(visibleNotes.length / 2)) * 180 + 20}px` } as React.CSSProperties}
-          >
+          <div className="board">
             <div className="board-grain"/>
-            {visibleNotes.map((note, index) => {
-              const mine = note.ownerId === effectiveOwnerId;
-              const canMove = !isMobile && (admin || (!readOnly && mine));
-              return <button
+            {visibleNotes.map((note, index) => <button
               type="button"
-              className={`sticky-note ${note.color} ${canMove ? "is-mine" : "is-locked"}`}
+              className={`sticky-note ${note.color}`}
               key={note.id}
-              style={{ left: `${note.x}%`, top: `${note.y}%`, transform: `rotate(${note.rotation}deg)`, zIndex: index + 1 }}
-              onPointerDown={event => dragStart(event, note)}
-              onClick={() => !canMove && setSelectedId(note.id)}
+              style={{ transform: `rotate(${note.rotation}deg)`, zIndex: index + 1 }}
+              onClick={() => setSelectedId(note.id)}
               aria-label={`${note.author || "匿名"}さんの付箋を読む`}
-              title={canMove ? (admin ? "管理者：ドラッグで動かせます" : "あなたの付箋：ドラッグで動かせます") : "クリックして読む"}
+              title="クリックして読む"
             >
               <span className="note-tape"/>
-              {canMove && <span className="mine-mark">{admin && !mine ? "かんり" : "じぶんの"}</span>}
               {note.emoji && <span className="note-emoji">{note.emoji}</span>}
               {note.drawing && <img className={`note-drawing ${!note.text ? "only-drawing" : ""}`} src={note.drawing} alt="投稿された落書き"/>}
               {note.text && <span className="note-text">{note.text}</span>}
               <span className="note-footer"><span>{note.author || "匿名"}</span><span className="note-like">♡ {note.likes}</span></span>
-            </button>})}
+            </button>)}
             {!notes.length && <div className="empty-board"><span>✦</span><b>まだ付箋がありません</b><p>最初の一枚を貼ってみませんか？</p></div>}
           </div>
         </div>
