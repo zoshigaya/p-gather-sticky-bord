@@ -43,7 +43,7 @@ const colors: { id: NoteColor; label: string }[] = [
   { id: "blue", label: "あお" },
   { id: "green", label: "みどり" },
 ];
-const emojis = ["", "🥳", "✌", "👏", "🍛", "🎉", "🌷","🍫"];
+const emojis = ["", "🥳", "✌", "👏", "🍛", "🎉", "🌷", "🍫"];
 
 const starterNotes: StickyNote[] = [
   {
@@ -753,13 +753,22 @@ export default function App() {
     setLiked((current) => new Set(current).add(id));
   };
   const remove = async (id: string) => {
+    const note = notes.find((item) => item.id === id);
+    const isOwner = note?.ownerId === effectiveOwnerId;
+    if (!admin && (readOnly || !isOwner)) return;
     if (!confirm("この付箋を削除しますか？")) return;
     if (supabase) {
-      const { data, error } = await supabase.rpc("admin_delete_sticky_note", {
-        note_id: id,
-        provided_password: adminSecret,
-      });
-      if (error || !data) {
+      const result = admin
+        ? await supabase.rpc("admin_delete_sticky_note", {
+            note_id: id,
+            provided_password: adminSecret,
+          })
+        : await supabase
+            .from("sticky_notes")
+            .delete()
+            .eq("id", id)
+            .eq("user_id", remoteOwnerId);
+      if (result.error || (admin && !result.data)) {
         setToast("削除できませんでした");
         return;
       }
@@ -1032,13 +1041,14 @@ export default function App() {
               {liked.has(selected.id) ? "ありがとう！" : "ハートを贈る"}
               <b>{selected.likes}</b>
             </button>
-            {admin && (
+            {(admin ||
+              (!readOnly && selected.ownerId === effectiveOwnerId)) && (
               <button
                 className="delete-button"
                 onClick={() => remove(selected.id)}
               >
                 <Icon name="trash" />
-                削除
+                {admin ? "削除" : "自分の付箋を削除"}
               </button>
             )}
           </div>
