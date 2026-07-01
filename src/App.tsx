@@ -271,6 +271,7 @@ function Icon({
 function DrawingCanvas({ onChange }: { onChange: (data?: string) => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
+  const activePointerId = useRef<number | null>(null);
   const [tool, setTool] = useState<"pen" | "eraser">("pen");
   const [lineWidth, setLineWidth] = useState(7);
 
@@ -283,6 +284,8 @@ function DrawingCanvas({ onChange }: { onChange: (data?: string) => void }) {
     };
   };
   const start = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (activePointerId.current !== null) return;
+    activePointerId.current = event.pointerId;
     drawing.current = true;
     event.currentTarget.setPointerCapture(event.pointerId);
     const ctx = event.currentTarget.getContext("2d")!;
@@ -291,7 +294,7 @@ function DrawingCanvas({ onChange }: { onChange: (data?: string) => void }) {
     ctx.moveTo(p.x, p.y);
   };
   const move = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (!drawing.current) return;
+    if (!drawing.current || activePointerId.current !== event.pointerId) return;
     const ctx = event.currentTarget.getContext("2d")!;
     const p = point(event);
     ctx.lineTo(p.x, p.y);
@@ -303,9 +306,10 @@ function DrawingCanvas({ onChange }: { onChange: (data?: string) => void }) {
     ctx.lineJoin = "round";
     ctx.stroke();
   };
-  const end = () => {
-    if (!drawing.current) return;
+  const end = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (!drawing.current || activePointerId.current !== event.pointerId) return;
     drawing.current = false;
+    activePointerId.current = null;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const pixels = canvas
