@@ -708,17 +708,16 @@ fieldset {
   gap: 14px;
   flex-wrap: wrap;
 }
-.color-options label {
+.color-options button {
+  padding: 0;
+  border: 0;
+  background: transparent;
   cursor: pointer;
   display: grid;
   justify-items: center;
   gap: 4px;
   color: #81776f;
   font-size: 9px;
-}
-.color-options input {
-  position: absolute;
-  opacity: 0;
 }
 .swatch {
   width: 38px;
@@ -728,7 +727,7 @@ fieldset {
   border: 3px solid #fff;
   box-shadow: 0 0 0 1px #ddd5ca;
 }
-.color-options input:checked + .swatch {
+.color-options button.selected .swatch {
   box-shadow: 0 0 0 2px var(--pink);
   transform: scale(1.05);
 }
@@ -1919,8 +1918,10 @@ fieldset {
     -webkit-overflow-scrolling: touch;
   }
   .create-modal {
-    height: auto;
+    height: calc(100dvh - 16px);
     max-height: calc(100dvh - 16px);
+    min-height: 0;
+    overflow-anchor: none;
   }
   .form-actions {
     position: sticky;

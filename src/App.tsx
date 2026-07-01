@@ -438,16 +438,17 @@ function NoteForm({ onClose, onCreate }: NoteFormProps) {
           <legend>付箋の色</legend>
           <div className="color-options">
             {colors.map((item) => (
-              <label key={item.id} title={item.label}>
-                <input
-                  type="radio"
-                  name="color"
-                  checked={color === item.id}
-                  onChange={() => setColor(item.id)}
-                />
+              <button
+                key={item.id}
+                type="button"
+                title={item.label}
+                className={color === item.id ? "selected" : ""}
+                aria-pressed={color === item.id}
+                onClick={() => setColor(item.id)}
+              >
                 <span className={`swatch ${item.id}`} />
                 <span>{item.label}</span>
-              </label>
+              </button>
             ))}
           </div>
         </fieldset>
