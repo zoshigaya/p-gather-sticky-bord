@@ -43,7 +43,7 @@ const colors: { id: NoteColor; label: string }[] = [
   { id: "blue", label: "あお" },
   { id: "green", label: "みどり" },
 ];
-const emojis = ["", "👏", "💖", "✨", "🥰", "🎉", "🌷"];
+const emojis = ["", "🥳", "✌", "👏", "🍛", "🎉", "🌷"];
 
 const starterNotes: StickyNote[] = [
   {
@@ -885,8 +885,6 @@ export default function App() {
           <div>
             <p className="little-note">Pギャザに来てくれてありがとう</p>
             <h1>
-              Pギャザ
-              <br />
               <span>感想ボード</span>
             </h1>
             <p className="welcome-copy">
