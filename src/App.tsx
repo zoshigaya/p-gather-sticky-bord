@@ -885,12 +885,6 @@ export default function App() {
         )}
         <section className="welcome-paper">
           <span className="welcome-tape" aria-hidden="true" />
-          <span className="scribble star-one" aria-hidden="true">
-            ☆
-          </span>
-          <span className="scribble star-two" aria-hidden="true">
-            ＊
-          </span>
           <div>
             <p className="little-note">Pギャザに来てくれてありがとう</p>
             <h1>

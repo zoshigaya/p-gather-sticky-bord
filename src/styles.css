@@ -1151,16 +1151,6 @@ fieldset {
     13px 13px;
   position: relative;
 }
-.handmade-shell:before {
-  content: "";
-  position: fixed;
-  left: clamp(18px, 5vw, 70px);
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: #dd8b8b38;
-  pointer-events: none;
-}
 .handmade-header {
   height: 58px;
   padding: 0 clamp(22px, 5vw, 70px);
@@ -1194,13 +1184,6 @@ fieldset {
     5px 11px 23px #705b3f1a;
   transform: rotate(-0.45deg);
   border: 1px solid #ddd3bd;
-}
-.welcome-paper:after {
-  content: "";
-  position: absolute;
-  inset: 8px;
-  border: 2px dashed #d8cbb3;
-  pointer-events: none;
 }
 .welcome-tape {
   position: absolute;
@@ -1269,15 +1252,6 @@ fieldset {
   justify-content: center;
   gap: 9px;
 }
-.write-button:before {
-  content: "";
-  position: absolute;
-  width: 58px;
-  height: 19px;
-  top: -9px;
-  left: 58px;
-  background: #ead7b3c7;
-}
 .write-button:hover {
   transform: rotate(-1deg) translateY(-2px);
 }
@@ -1290,24 +1264,6 @@ fieldset {
   font-family: "Kiwi Maru";
   font-size: 10px;
   color: #8d8175;
-}
-.scribble {
-  position: absolute !important;
-  font-family: "Kiwi Maru";
-  color: #d07878;
-  font-size: 24px;
-  z-index: 2 !important;
-}
-.star-one {
-  left: 24px;
-  top: 25px;
-  transform: rotate(-12deg);
-}
-.star-two {
-  right: 20px;
-  bottom: 14px;
-  color: #6e9ca4;
-  transform: rotate(10deg);
 }
 .board-section {
   padding-top: 0;
@@ -1478,9 +1434,6 @@ fieldset {
   .board-pagination {
     margin-top: 18px;
   }
-  .handmade-shell:before {
-    left: 14px;
-  }
   .mine-mark {
     font-size: 7px;
   }
@@ -1526,10 +1479,6 @@ fieldset {
   padding: 28px 42px 24px;
   gap: 28px;
 }
-.welcome-paper:after {
-  inset: 7px;
-  border-width: 1px;
-}
 .welcome-tape {
   width: 82px;
   height: 24px;
@@ -1561,22 +1510,9 @@ fieldset {
   font-size: 14px;
   box-shadow: 2px 4px 0 #c7a849;
 }
-.write-button:before {
-  width: 48px;
-  height: 15px;
-  top: -7px;
-  left: 50px;
-}
 .welcome-action small {
   font-size: 9px;
   margin-top: 10px;
-}
-.scribble {
-  font-size: 18px;
-}
-.star-one {
-  left: 19px;
-  top: 20px;
 }
 .create-modal {
   width: min(720px, 100%);
@@ -1703,20 +1639,8 @@ fieldset {
     height: 44px;
     font-size: 12px;
   }
-  .write-button:before {
-    width: 40px;
-    height: 12px;
-    left: 45px;
-  }
   .welcome-action small {
     display: none;
-  }
-  .scribble {
-    font-size: 14px;
-  }
-  .star-one {
-    left: 13px;
-    top: 14px;
   }
 }
 .connection-error {
