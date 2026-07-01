@@ -28,7 +28,9 @@ type StickyNote = {
 const STORAGE_KEY = "p-gather-sticky-notes-v1";
 const LIKED_KEY = "p-gather-liked-notes-v1";
 const OWNER_KEY = "p-gather-board-owner-v1";
+const LAST_POSTED_AT_KEY = "p-gather-last-posted-at-v1";
 const NOTES_PER_PAGE = 12;
+const POST_COOLDOWN_MS = 15 * 60 * 1000;
 
 function getOwnerId() {
   const saved = localStorage.getItem(OWNER_KEY);
@@ -649,6 +651,14 @@ export default function App() {
   const createNote = async (
     input: Pick<StickyNote, "author" | "text" | "color" | "emoji" | "drawing">,
   ) => {
+    const lastPostedAt = Number(localStorage.getItem(LAST_POSTED_AT_KEY) ?? 0);
+    const remainingMs = POST_COOLDOWN_MS - (Date.now() - lastPostedAt);
+    if (remainingMs > 0) {
+      setToast(
+        `連続投稿は15分空けてください（あと約${Math.ceil(remainingMs / 60000)}分）`,
+      );
+      return;
+    }
     const now = new Date().toISOString();
     const note: StickyNote = {
       ...input,
@@ -666,6 +676,7 @@ export default function App() {
         setToast("接続準備中です。少し待ってから試してください");
         return;
       }
+      let uploadedDrawingPath: string | undefined;
       try {
         let drawingUrl: string | undefined;
         if (input.drawing) {
@@ -677,6 +688,7 @@ export default function App() {
               upsert: false,
             });
           if (uploadError) throw uploadError;
+          uploadedDrawingPath = path;
           drawingUrl = supabase.storage.from("drawings").getPublicUrl(path)
             .data.publicUrl;
         }
@@ -702,16 +714,26 @@ export default function App() {
           ...current.filter((item) => item.id !== note.id),
         ]);
       } catch (error) {
+        if (uploadedDrawingPath) {
+          await supabase.storage.from("drawings").remove([uploadedDrawingPath]);
+        }
+        const message =
+          typeof error === "object" && error && "message" in error
+            ? String(error.message)
+            : "";
         setToast(
-          error instanceof Error
-            ? `投稿できませんでした：${error.message}`
-            : "投稿できませんでした",
+          message.includes("sticky_note_rate_limit")
+            ? "連続投稿は15分空けてください"
+            : message
+              ? `投稿できませんでした：${message}`
+              : "投稿できませんでした",
         );
         return;
       }
     } else {
       setNotes((current) => [note, ...current]);
     }
+    localStorage.setItem(LAST_POSTED_AT_KEY, String(Date.now()));
     setPage(0);
     setCreating(false);
     setToast("付箋をボードに貼りました！");
