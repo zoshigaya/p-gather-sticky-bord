@@ -511,6 +511,8 @@ textarea:focus-visible {
   -webkit-box-orient: vertical;
   flex: 1;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .note-drawing {
   width: 100%;
@@ -612,6 +614,7 @@ footer small {
   width: min(600px, 100%);
   max-height: calc(100vh - 40px);
   overflow-y: auto;
+  overflow-x: hidden;
   border-radius: 18px;
   background: #fffdfa;
   box-shadow: 0 25px 70px #1f161159;
@@ -837,6 +840,8 @@ fieldset {
   font-size: 18px;
   line-height: 1.95;
   margin: 0 0 40px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .detail-paper > img {
   display: block;

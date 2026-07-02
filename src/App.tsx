@@ -31,6 +31,7 @@ const OWNER_KEY = "p-gather-board-owner-v1";
 const LAST_POSTED_AT_KEY = "p-gather-last-posted-at-v1";
 const NOTES_PER_PAGE = 12;
 const POST_COOLDOWN_MS = 15 * 60 * 1000;
+const NOTE_TEXT_MAX_LENGTH = 200;
 
 function getOwnerId() {
   const saved = localStorage.getItem(OWNER_KEY);
@@ -428,11 +429,13 @@ function NoteForm({ onClose, onCreate }: NoteFormProps) {
           <textarea
             autoFocus
             value={text}
-            maxLength={500}
+            maxLength={NOTE_TEXT_MAX_LENGTH}
             onChange={(e) => setText(e.target.value)}
             placeholder="好きだったところ、ひとこと感想など…（空欄でもOK）"
           />
-          <small className="counter">{text.length} / 500</small>
+          <small className="counter">
+            {text.length} / {NOTE_TEXT_MAX_LENGTH}
+          </small>
         </label>
         <fieldset>
           <legend>
